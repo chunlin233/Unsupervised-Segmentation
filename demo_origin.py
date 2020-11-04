@@ -6,6 +6,8 @@ import torch.optim as optim
 from torch.autograd import Variable
 import cv2
 import numpy as np
+from time import time
+from torchvision import transforms
 from skimage import segmentation
 
 """
@@ -28,7 +30,7 @@ use_cuda = torch.cuda.is_available()
 parser = argparse.ArgumentParser(description='PyTorch Unsupervised Segmentation')
 parser.add_argument('--nChannel', metavar='N', default=100, type=int,
                     help='number of channels')
-parser.add_argument('--maxIter', metavar='T', default=128, type=int,
+parser.add_argument('--maxIter', metavar='T', default=64, type=int,
                     help='number of maximum iterations')
 parser.add_argument('--minLabels', metavar='minL', default=3, type=int,
                     help='minimum number of labels')
@@ -46,15 +48,16 @@ parser.add_argument('--input', metavar='FILENAME', default='image/woof.jpg', typ
                     help='input image file name', )
 args = parser.parse_args()
 
-
 # CNN model
 class MyNet(nn.Module):
     def __init__(self, input_dim):
         super(MyNet, self).__init__()
         self.conv1 = nn.Conv2d(input_dim, args.nChannel, kernel_size=3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm2d(args.nChannel)
-        self.conv2 = []
-        self.bn2 = []
+        # self.conv2 = []
+        # self.bn2 = []
+        self.conv2 = nn.ModuleList([])
+        self.bn2 = nn.ModuleList([])
         for i in range(args.nConv - 1):
             self.conv2.append(nn.Conv2d(args.nChannel, args.nChannel, kernel_size=3, stride=1, padding=1))
             self.bn2.append(nn.BatchNorm2d(args.nChannel))
@@ -73,16 +76,42 @@ class MyNet(nn.Module):
         x = self.bn3(x)
         return x
 
+class Logger():
+
+    def __init__(self, filepath):
+        self.fileWriter = open(filepath, 'w')
+
+    def print_log(self, *text):
+        log = ''
+        for t in text:
+            log += str(t) + ' '
+        print(log)
+        self.fileWriter.write(log+'\n')
+
+    def close_file(self):
+        self.fileWriter.close()
+
+name = os.path.split(args.input)[-1]
+name = name.split('.')[0]
+filepath = 'origin_results/report_%s.txt' % name
+logger = Logger(filepath)
+
+# ————————————————————initialize————————————————————
+logger.print_log("start initialization...")
+start_time = time()
 
 # load image
 im = cv2.imread(args.input)
+im = cv2.resize(
+    im, (int(im.shape[1]/2), int(im.shape[0]/2)), interpolation=cv2.INTER_AREA)
+
 data = torch.from_numpy(np.array([im.transpose((2, 0, 1)).astype('float32') / 255.]))
 if use_cuda:
     data = data.cuda()
 data = Variable(data)
 
 # slic
-labels = segmentation.slic(im, compactness=args.compactness, n_segments=args.num_superpixels)
+labels = segmentation.slic(im, compactness=args.compactness, n_segments=args.num_superpixels, start_label=1)
 # labels = segmentation.slic(im, compactness=args.compactness, n_segments=args.num_superpixels, max_iter=1)
 labels = labels.reshape(im.shape[0] * im.shape[1])
 u_labels = np.unique(labels)
@@ -90,19 +119,23 @@ l_inds = []
 for i in range(len(u_labels)):
     l_inds.append(np.where(labels == u_labels[i])[0])
 
-# train
+# initialize for training c
 model = MyNet(data.size(1))
 if use_cuda:
     model.cuda()
-    for i in range(args.nConv - 1):
-        model.conv2[i].cuda()
-        model.bn2[i].cuda()
+    # for i in range(args.nConv - 1):
+    #     model.conv2[i].cuda()
+    #     model.bn2[i].cuda()
 model.train()
 loss_fn = torch.nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
 label_colours = np.random.randint(255, size=(100, 3))
 
-from time import time
+init_time = time() - start_time
+logger.print_log('InitTimeUsed:', str(init_time))
+
+# ————————————————————start trainning————————————————————
+print("start trainning...")
 start_time = time()
 
 for batch_idx in range(args.maxIter):
@@ -116,10 +149,15 @@ for batch_idx in range(args.maxIter):
     if args.visualize:
         im_target_rgb = np.array([label_colours[c % 100] for c in im_target])
         im_target_rgb = im_target_rgb.reshape(im.shape).astype(np.uint8)
-        cv2.imshow("output", im_target_rgb)
-        cv2.waitKey(1)
-        # if np.log2(batch_idx) % 1 == 0:
-        #     cv2.imwrite("output_%s_%02i.jpg" % (args.input, batch_idx), im_target_rgb)
+        # cv2.imshow("output", im_target_rgb)
+        # cv2.waitKey(1)
+        # if np.log2(batch_idx+1) % 1 == 0:
+        if batch_idx==0 or (batch_idx+1)%16==0:
+            name = os.path.split(args.input)[-1]
+            name = name.split('.')[0]
+            cv2.imwrite("origin_results/output_%s_%02i.jpg" % (name, batch_idx), im_target_rgb)
+            # print("numbers of lables: ", str(nLabels))
+            logger.print_log("numbers of lables: " , nLabels)
 
     # superpixel refinement
     # TODO: use Torch Variable instead of numpy for faster calculation
@@ -138,12 +176,15 @@ for batch_idx in range(args.maxIter):
     loss.backward()
     optimizer.step()
 
-    print(batch_idx, '/', args.maxIter, ':', nLabels, loss.data[0])
+    # print(batch_idx, '/', args.maxIter, ':', nLabels, loss.item())
+    logger.print_log(batch_idx, '/', args.maxIter, ':', nLabels, loss.item())
     # if nLabels <= args.minLabels:
     #     print("nLabels", nLabels, "reached minLabels", args.minLabels, ".")
     #     break
 time1= int(time() - start_time)
-print('TimeUsed: %.2f' % time1)
+# print('TrainTimeUsed: %.2f' % time1)
+logger.print_log('TrainTimeUsed: %.2f' % time1)
+logger.close_file()
 
 # save output image
 if not args.visualize:
@@ -153,5 +194,5 @@ if not args.visualize:
     im_target = target.data.cpu().numpy()
     im_target_rgb = np.array([label_colours[c % 100] for c in im_target])
     im_target_rgb = im_target_rgb.reshape(im.shape).astype(np.uint8)
-cv2.imwrite("output_%s_128_%is.jpg" % (args.input[6:-4], time1), im_target_rgb)
+cv2.imwrite("final_%s_%d_%is.jpg" % (args.input[6:-4], args.maxIter, time1), im_target_rgb)
 
