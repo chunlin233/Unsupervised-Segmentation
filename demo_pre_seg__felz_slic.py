@@ -12,27 +12,28 @@ def press_wasdqe_to_adjust_parameter_of_felz(img):
     act_dict.update(zip([119, 97, 113], [(i, 1.2) for i in range(len(paras))], ))  # _KeyBoard: W A Q
     act_dict.update(zip([115, 100, 101], [(i, 0.8) for i in range(len(paras))], ))  # KeyBoard: S D E
 
-    key = 0
-    while True:
-        if key != -1:
-            i, multi = act_dict[key]
-            paras[i] *= multi
-            print(key, paras)
+    # key = 0
+    # while True:
+    #     if key != -1:
+    #         i, multi = act_dict[key]
+    #         paras[i] *= multi
+    #         print(key, paras)
 
-            seg_map = segmentation.felzenszwalb(img,
-                                                scale=int(paras[0]),
-                                                sigma=paras[1],
-                                                min_size=int(paras[2]))
-            show = mark_boundaries(img, seg_map)
-            cv2.imshow('', show)
+    seg_map = segmentation.felzenszwalb(img,
+                                        scale=int(paras[0]),
+                                        sigma=paras[1],
+                                        min_size=int(paras[2]))
+    show = mark_boundaries(img, seg_map)
+    # cv2.imshow('', show)
+    cv2.imwrite('totoro_felz.jpg', show * 255)
 
-            wait_time = 1
-        else:
-            wait_time = 100
+    #         wait_time = 1
+    #     else:
+    #         wait_time = 100
 
-        key = cv2.waitKey(wait_time)
-        break
-    cv2.imwrite('tiger_felz.jpg', show * 255)
+    #     key = cv2.waitKey(wait_time)
+    #     break
+    # cv2.imwrite('tiger_felz.jpg', show * 255)
 
 
 def press_wasdqe_to_adjust_parameter_of_slic(img):
@@ -68,6 +69,7 @@ def press_wasdqe_to_adjust_parameter_of_slic(img):
 
 
 if __name__ == '__main__':
-    image = cv2.imread('image/tiger.jpg')
+    # image = cv2.imread('image/tiger.jpg')
+    image = cv2.imread('image/totoro.png')
     press_wasdqe_to_adjust_parameter_of_felz(image)
     # press_wasdqe_to_adjust_parameter_of_slic(image)

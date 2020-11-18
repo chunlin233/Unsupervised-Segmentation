@@ -5,6 +5,9 @@ import cv2
 import numpy as np
 from skimage import segmentation
 
+os.environ['CUDA_VISIBEL_DEVICES'] = '5'
+os.chdir('/home/hchunlin/Documents/Projects/Unsupervised-Segmentation')
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,8 +16,6 @@ import os
 from time import time
 import argparse
 
-os.environ['CUDA_VISIBEL_DEVICES'] = '0'
-os.chdir('/home/hchunlin/Projects/Unsupervised-Segmentation')
 use_cuda = torch.cuda.is_available()
 
 parser = argparse.ArgumentParser(description='Modified Unsupervised Segmentation')
@@ -96,8 +97,7 @@ def run():
     np.random.seed(1943)
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpuId  # choose GPU:0
     image = cv2.imread(args.input)
-    # image = cv2.resize(
-    #     image, (int(image.shape[1]/2), int(image.shape[0]/2)), interpolation=cv2.INTER_AREA)
+    image = cv2.resize(image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
 
     '''segmentation ML'''
     seg_map = segmentation.felzenszwalb(image, scale=32, sigma=0.5, min_size=64)
@@ -120,7 +120,7 @@ def run():
     
 
     '''train init'''
-    device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda:1" if torch.cuda.is_available() else 'cpu')
 
     tensor = image.transpose((2, 0, 1))
     tensor = tensor.astype(np.float32) / 255.0
@@ -167,7 +167,7 @@ def run():
         # un_label, lab_inverse = np.unique(im_target, return_inverse=True, )
         un_label = np.unique(im_target)
         nLabels = len(un_label)
-        if un_label.shape[0] < args.maxLabelNum and (batch_idx+1)%8==0:  # update show
+        if nLabels < args.maxLabelNum and (batch_idx+1) % 8 == 0:  # update show
             img_flatten = image_flatten.copy()
             # if len(color_avg) != un_label.shape[0]:
             #     color_avg = [np.mean(img_flatten[im_target == label], axis=0, dtype=np.int) for label in un_label]
@@ -190,9 +190,17 @@ def run():
             break
 
     '''save'''
+    # lab_inverse: 相当于是根据拍好序的un_label对im_target进行重新编号
+    un_label, lab_inverse = np.unique(im_target, return_inverse=True, )
+    nLabels = len(un_label)
+    print(np.max(lab_inverse), np.min(lab_inverse))
+
     train_time = time() - start_time2
     logger.print_log('SegInit: %.2f\nPyTorchInit: %.2f\nTrainTimeUsed: %.2f' % (seg_init_Time, pytorch_init_time, train_time))
+    logger.print_log('Number of labels: %02i' % (nLabels))
     cv2.imwrite("modify_results/final_%s_%ds.jpg" % (args.input[6:-4], train_time), show)
+    cv2.imwrite("modify_results/label_%s_%ds.png" %
+                (args.input[6:-4], train_time), lab_inverse.reshape(image.shape[:2]))
 
 
 if __name__ == '__main__':
